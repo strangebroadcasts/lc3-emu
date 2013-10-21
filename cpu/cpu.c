@@ -1,4 +1,10 @@
+#include <stdio.h>
 #include "cpu.h"
+
+#define PROGRAM_START 0x3000
+
+// Let the LC3 OS handle system calls?
+#define NATIVE_TRAP_HANDLING 0
 
 // TODO:
 // * proper interrupt implementation
@@ -40,7 +46,8 @@ void CPU_Init(struct CPU_State *state)
     state->psr.n = 0;
     state->psr.z = 0;
     state->psr.p = 0;
-    state->pc = 0x3000;
+    state->pc = PROGRAM_START;
+    state->mem[MCR] = (1 << 15);
 }
 
 void CPU_Step(struct CPU_State *state)
@@ -142,8 +149,12 @@ void CPU_Step(struct CPU_State *state)
         break;
 
     case 0b1111: // TRAP
-        state->reg[7] = state->pc;
-        state->pc = state->mem[TRAPVECT8(inst)] - 1;
+        state->reg[7] = state->pc + 1;
+        if(NATIVE_TRAP_HANDLING){
+            state->pc = state->mem[TRAPVECT8(inst)] - 1;
+        } else {
+            CPU_HandleTrap(state, TRAPVECT8(inst));
+        }
         break;
 
     default: // ILLEGAL OPCODE - shouldn't actually happen
@@ -151,4 +162,86 @@ void CPU_Step(struct CPU_State *state)
 
     }
     state->pc++;
+}
+
+// Handle system calls by routing them to standard I/O functions.
+// If the OS should handle the calls instead,
+// set NATIVE_TRAP_HANDLING to 1.
+void CPU_HandleTrap(struct CPU_State *state, int trap)
+{
+    int offset;
+    switch(trap){
+    case 0x20: // GETC - read character into R0 without prompt
+        state->reg[0] = getchar();
+        break;
+    case 0x21: // OUT - write character in R0 to display
+        printf("%c", state->reg[0] & 0xff);
+        break;
+    case 0x22: // PUTS - write string to screen.
+        offset = state->reg[0];
+        while(state->mem[offset] != 0 && offset < 0x10000){
+            printf("%c", state->mem[offset] & 0xff);
+            offset++;
+        }
+        break;
+    case 0x23: // IN - read single character into R0 with prompt
+        printf("?");
+        char console_input;
+        scanf("%c", &console_input);
+        state->reg[0] = console_input;
+        break;
+    case 0x24: // PUTSP - write string (using two characters for each memory location) 
+        offset = state->reg[0];
+        while(state->mem[offset] != 0 && offset < 0x10000){
+            printf("%c%c", state->mem[offset] & 0xff, (state->mem[offset] >> 8) & 0xff);
+            offset++;
+        }
+        break;
+    case 0x25: // HALT
+        state->mem[MCR] = 0; // set the MCR to 0, stopping the computer
+        break;
+    default: // illegal system call
+        fprintf(stderr, "ERROR: called unknown trap routine %x", trap); 
+        break;
+    }
+    state->pc = state->reg[7];
+}
+
+void CPU_LoadImageFromFile(struct CPU_State *state, char *filename, int offset)
+{
+    FILE *image = NULL;
+    image = fopen(filename, "rb");
+    fread(&state->mem[offset], sizeof(int16_t), 0x10000 - offset, image);
+    fclose(image);
+}
+
+void CPU_DumpMemoryToFile(struct CPU_State *state, char *filename)
+{
+    FILE *memdump = NULL;
+    memdump = fopen(filename, "wb");
+    fwrite(&state->mem, sizeof(int16_t), 0x10000, memdump);
+    fclose(memdump);
+}
+
+void CPU_DebugStatus(struct CPU_State *state)
+{
+    printf("Currently executing instruction %x\n", state->pc);
+    printf("Registers: ");
+    int i = 0;
+    for(i = 0; i < 8; i++) {
+        printf("R%d = %d, ", i, state->reg[i]);
+    }
+
+    printf("\nPSR: Running in ");
+    if(state->psr.privmode == 0){
+        printf("supervisor");
+    } else {
+        printf("user");
+    }
+    printf(" mode, priority level %d, flags: N = %d, Z = %d, P = %d\n",
+        state->psr.priority, state->psr.n, state->psr.z, state->psr.p);
+}
+
+int CPU_IsRunning(struct CPU_State *state){
+    return state->mem[MCR];
 }
