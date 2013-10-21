@@ -1,8 +1,6 @@
 #include <stdio.h>
 #include "cpu.h"
 
-#define PROGRAM_START 0x3000
-
 // Let the LC3 OS handle system calls?
 #define NATIVE_TRAP_HANDLING 0
 

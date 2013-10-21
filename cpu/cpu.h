@@ -22,6 +22,8 @@
 #define DDR 0xFE06
 #define MCR 0xFFFE
 
+#define PROGRAM_START 0x3000
+
 struct CPU_StatusRegister {
     unsigned int privmode: 1;
     unsigned int : 4;
